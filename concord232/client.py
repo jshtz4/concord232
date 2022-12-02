@@ -10,45 +10,40 @@ class Client(object):
         self._last_event_index = 0
 
     def list_zones(self):
-        r = self._session.get(self._url + '/zones')
+        r = self._session.get(self._url + "/zones")
         try:
-            return r.json['zones']
+            return r.json["zones"]
         except TypeError:
-            return r.json()['zones']
+            return r.json()["zones"]
 
     def list_partitions(self):
-        r = self._session.get(self._url + '/partitions')
+        r = self._session.get(self._url + "/partitions")
         try:
-            return r.json['partitions']
+            return r.json["partitions"]
         except TypeError:
-            return r.json()['partitions']
+            return r.json()["partitions"]
 
-    def arm(self, level, option = None):
+    def arm(self, level, option=None):
         r = self._session.get(
-            self._url + '/command',
-            params={'cmd': 'arm',
-                    'level': level,
-                    'option': option})
+            self._url + "/command", params={"cmd": "arm", "level": level, "option": option}
+        )
         return r.status_code == 200
 
     def disarm(self, master_pin):
         r = self._session.get(
-            self._url + '/command',
-            params={'cmd': 'disarm',
-                    'master_pin': master_pin})
+            self._url + "/command", params={"cmd": "disarm", "master_pin": master_pin}
+        )
         return r.status_code == 200
 
     def send_keys(self, keys, group=False):
         r = self._session.get(
-            self._url + '/command',
-            params={'cmd': 'keys',
-                    'keys': keys,
-                    'group': group})
+            self._url + "/command", params={"cmd": "keys", "keys": keys, "group": group}
+        )
         return r.status_code == 200
 
     def get_version(self):
-        r = self._session.get(self._url + '/version')
+        r = self._session.get(self._url + "/version")
         if r.status_code == 404:
-            return '1.0'
+            return "1.0"
         else:
-            return r.json()['version']
+            return r.json()["version"]

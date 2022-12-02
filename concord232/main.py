@@ -7,27 +7,26 @@ import threading
 from concord232 import api
 from concord232 import concord
 
-LOG_FORMAT = '%(asctime)-15s %(module)s %(levelname)s %(message)s'
+LOG_FORMAT = "%(asctime)-15s %(module)s %(levelname)s %(message)s"
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='config.ini',
-                        metavar='FILE',
-                        help='Path to config file')
-    parser.add_argument('--debug', default=False, action='store_true',
-                        help='Enable debug')
-    parser.add_argument('--log', default=None,
-                        metavar='FILE',
-                        help='Path to log file')
-    parser.add_argument('--serial', default=None,
-                        metavar='PORT',
-                        help='Serial port to open for stream')
-    parser.add_argument('--listen', default='0.0.0.0',
-                        metavar='ADDR',
-                        help='Listen address (defaults to 0.0.0.0 (all interfaces))')
-    parser.add_argument('--port', default=5007, type=int,
-                        help='Listen port (defaults to 5007)')
+    parser.add_argument(
+        "--config", default="config.ini", metavar="FILE", help="Path to config file"
+    )
+    parser.add_argument("--debug", default=False, action="store_true", help="Enable debug")
+    parser.add_argument("--log", default=None, metavar="FILE", help="Path to log file")
+    parser.add_argument(
+        "--serial", default=None, metavar="PORT", help="Serial port to open for stream"
+    )
+    parser.add_argument(
+        "--listen",
+        default="0.0.0.0",
+        metavar="ADDR",
+        help="Listen address (defaults to 0.0.0.0 (all interfaces))",
+    )
+    parser.add_argument("--port", default=5007, type=int, help="Listen port (defaults to 5007)")
     args = parser.parse_args()
 
     LOG = logging.getLogger()
@@ -37,9 +36,8 @@ def main():
 
     if args.debug and not istty:
         debug_handler = logging.handlers.RotatingFileHandler(
-            'debug.log',
-            maxBytes=1024*1024*10,
-            backupCount=3)
+            "debug.log", maxBytes=1024 * 1024 * 10, backupCount=3
+        )
         debug_handler.setFormatter(formatter)
         debug_handler.setLevel(logging.DEBUG)
         LOG.addHandler(debug_handler)
@@ -52,20 +50,19 @@ def main():
 
     if args.log:
         log_handler = logging.handlers.RotatingFileHandler(
-            args.log,
-            maxBytes=1024*1024*10,
-            backupCount=3)
+            args.log, maxBytes=1024 * 1024 * 10, backupCount=3
+        )
         log_handler.setFormatter(formatter)
         log_handler.setLevel(logging.DEBUG)
         LOG.addHandler(log_handler)
 
-    LOG.info('Ready')
-    logging.getLogger('connectionpool').setLevel(logging.WARNING)
+    LOG.info("Ready")
+    logging.getLogger("connectionpool").setLevel(logging.WARNING)
 
     if args.serial:
         ctrl = concord.AlarmPanelInterface(args.serial, 0.25, LOG)
     else:
-        LOG.error('Serial and baudrate are required')
+        LOG.error("Serial and baudrate are required")
         return
 
     api.CONTROLLER = ctrl
@@ -73,5 +70,5 @@ def main():
     t = threading.Thread(target=ctrl.message_loop)
     t.daemon = True
     t.start()
-    
+
     api.app.run(debug=False, host=args.listen, port=args.port, threaded=True)
