@@ -1,64 +1,66 @@
 from datetime import datetime
-import sys
 import time
 import traceback
-
-
-is_py2 = sys.version[0] == '2'
-if is_py2:
-    import Queue as Queue
-else:
-    import queue as Queue
-
+import queue as Queue
 import serial
 
 
-from concord232.concord_commands import RX_COMMANDS, \
-    build_cmd_equipment_list, EQPT_LIST_REQ_TYPES, \
-    build_dynamic_data_refresh, build_keypress, \
-    build_cmd_alarm_trouble, KEYPRESS_CODES
+from concord232.concord_commands import (
+    RX_COMMANDS,
+    build_cmd_equipment_list,
+    EQPT_LIST_REQ_TYPES,
+    build_dynamic_data_refresh,
+    build_keypress,
+    build_cmd_alarm_trouble,
+    KEYPRESS_CODES,
+)
 
 from concord232.concord_helpers import ascii_hex_to_byte, total_secs
 
 CONCORD_MAX_ZONE = 6
 
-CONCORD_BAUD     = 9600
+CONCORD_BAUD = 9600
 CONCORD_BYTESIZE = serial.EIGHTBITS
 CONCORD_STOPBITS = serial.STOPBITS_ONE
-CONCORD_PARITY   = serial.PARITY_ODD
+CONCORD_PARITY = serial.PARITY_ODD
 
-CONCORD_MAX_LEN = 58 # includes last-index (length) byte but not checksum
+CONCORD_MAX_LEN = 58  # includes last-index (length) byte but not checksum
 
-MSG_START = chr(0x0A) # line feed
-ACK       = chr(0x06)
-NAK       = chr(0x15)
+MSG_START = chr(0x0A)  # line feed
+ACK = chr(0x06)
+NAK = chr(0x15)
 
 CTRL_CHARS = (ACK, NAK)
 
 # Timeout within which sender expects to receive ACKs, in seconds.
 #   inbound = message from us to panel
 #   outbound = message from panel to us
-ACK_TIMEOUT_INBOUND  = 1.0
-ACK_TIMEOUT_OUTBOUND = 2.0 
+ACK_TIMEOUT_INBOUND = 1.0
+ACK_TIMEOUT_OUTBOUND = 2.0
 MAX_RESENDS = 3
 
-STOP = 'STOP'
+STOP = "STOP"
+
 
 class CommException(Exception):
     pass
 
+
 class TimeoutException(CommException):
     pass
+
 
 class BadEncoding(CommException):
     pass
 
+
 class BadChecksum(CommException):
     pass
 
+
 class SerialInterface(object):
     def __init__(self, dev_name, timeout_secs, control_char_cb, logger):
-        """ 
+        """
         *dev_name* is string name of the device e.g. /dev/cu.usbserial
         *timeout_secs* in fractional seconds; e.g. 0.25 = 250 milliseconds
         """
@@ -66,23 +68,30 @@ class SerialInterface(object):
         self.logger = logger
         self.logger.debug("SerialInterface Starting")
         # Ugly debugging hack
-        if dev_name == 'fake':
+        if dev_name == "fake":
             return
-        self.serdev = serial.serial_for_url(dev_name, baudrate=CONCORD_BAUD,
-                                    bytesize=CONCORD_BYTESIZE, parity=CONCORD_PARITY,
-                                    stopbits=CONCORD_STOPBITS, timeout=timeout_secs,
-                                    xonxoff=False, rtscts=False, dsrdtr=False)
+        self.serdev = serial.serial_for_url(
+            dev_name,
+            baudrate=CONCORD_BAUD,
+            bytesize=CONCORD_BYTESIZE,
+            parity=CONCORD_PARITY,
+            stopbits=CONCORD_STOPBITS,
+            timeout=timeout_secs,
+            xonxoff=False,
+            rtscts=False,
+            dsrdtr=False,
+        )
 
     def message_chars_maybe_available(self):
         return self.serdev.inWaiting() > 0
 
     def wait_for_message_start(self):
-        """ 
+        """
         Read from the serial port until the message-start character is
         received, discarding other characters.  Special control
         characters are handled with the previously provided handler as
         they are encountered.
-        
+
         Returns MSG_START when that character is read from the port;
         if there is a timeout, returns None.
         """
@@ -90,60 +99,60 @@ class SerialInterface(object):
         byte_read = None
         while byte_read != MSG_START:
             byte_read = self._read1()
-            if byte_read == '':
+            if byte_read == "":
                 # Timeout
                 return None
-            #self.logger.debug("Wait for message start, byte_read=%r" % byte_read)
+            # self.logger.debug("Wait for message start, byte_read=%r" % byte_read)
             if byte_read in CTRL_CHARS:
                 self.control_char_cb(byte_read)
             # Discard the unrecognized character
-    
+
         return MSG_START
 
     def _read1(self):
-        c = self.serdev.read(size=1).decode('utf-8')
+        c = self.serdev.read(size=1).decode("utf-8")
         return c
 
     def _try_to_read(self, n):
-        """ 
+        """
         Try to read *n* message chars from the serial port; if there is a
         timeout raise an exception.  Returns tuple of (message chars, control chars).
         """
-        ctrl_chars = [ ]
-        chars_read = [ ]
+        ctrl_chars = []
+        chars_read = []
         while len(chars_read) < n:
             one_char = self._read1()
-            if one_char == '':
+            if one_char == "":
                 raise TimeoutException("Timeout in the middle of reading message from the panel")
             if one_char in CTRL_CHARS:
                 ctrl_chars.append(one_char)
             else:
                 chars_read.append(one_char)
         return chars_read, ctrl_chars
-        
+
     def read_next_message(self):
         """
         Read the next message from the serial port, assuming the
         message-start character has just been read.
-        
+
         Returned message is array of bytes.
-        
+
         It is decoded from the ASCII representation, and includes the
         checksum on the end, and the length byte at the start.  The
         checksum is NOT validated.
-        
+
         A valid message will have at 2 bytes for length & checksum,
         plus at least a single byte for the command code, so 3 or more
         bytes in total.
-        
+
         This function will read as many length bytes as are indicated at
         the start of the message, which may *not* be a valid message, and
         so the message returned from here may be as short as only one byte
         (the length byte).
-        
+
         May raise TimeoutException if there is a timeout while reading the
         message.
-        
+
         If any special control character is encountered while reading the
         message, control_char_cb will be called with that character.
         """
@@ -154,59 +163,59 @@ class SerialInterface(object):
         try:
             msg_len = ascii_hex_to_byte(len_bytes)
         except ValueError:
-            raise BadEncoding("Invalid length encoding: 0x%x 0x%x" % \
-                                  (len_bytes[0], len_bytes[1]))
-    
+            raise BadEncoding("Invalid length encoding: 0x%x 0x%x" % (len_bytes[0], len_bytes[1]))
+
         # Read the rest of the message, including checksum.
-        msg_ascii = [' '] * (msg_len + 1) * 2
+        msg_ascii = [" "] * (msg_len + 1) * 2
         msg_ascii[0:2] = len_bytes
         msg_bytes, ctrl_chars2 = self._try_to_read(msg_len * 2)
         msg_ascii[2:] = msg_bytes
         ctrl_chars.extend(ctrl_chars2)
-    
+
         # Handle any control characters; we are assuming it's ok to wait
         # until the end of the message to deal with them, since they can
         # be sent asynchronously with respect to other messages sent by
         # the panel e.g. an ACK to one of our sent messages
         for cc in ctrl_chars:
             self.control_char_cb(cc)
-    
+
         # Decode from ascii hex representation to binary.
-        msg_bin = [ 0 ] * (msg_len + 1)
+        msg_bin = [0] * (msg_len + 1)
         try:
             for i in range(msg_len + 1):
-                msg_bin[i] = ascii_hex_to_byte(msg_ascii[2*i:2*i+2])
+                msg_bin[i] = ascii_hex_to_byte(msg_ascii[2 * i : 2 * i + 2])
         except ValueError:
             raise BadEncoding("Invalid message encoding: %r" % msg_ascii)
-    
+
         return msg_bin
 
     def write_message(self, msg):
-        """ 
+        """
         *msg* is a message in binary format, with a valid checksum,
         but no leading message-start character.  This method writes an
         ASCII_encoded message to the port preceded by the
         message-start linefeed character.
         """
-        framed_msg = MSG_START + encode_message_to_ascii(msg) 
-        #self.logger.debug("write_message: %r" % framed_msg)
+        framed_msg = MSG_START + encode_message_to_ascii(msg)
+        # self.logger.debug("write_message: %r" % framed_msg)
         self.serdev.write(framed_msg.encode())
-        
 
     def write(self, data):
-        """ Write raw *data* to the serial port. """
+        """Write raw *data* to the serial port."""
         self.serdev.write(data)
 
     def close(self):
         self.serdev.close()
 
+
 def compute_checksum(bin_msg):
-    """ Compute checksum over all of *bin_msg*. """
+    """Compute checksum over all of *bin_msg*."""
     assert len(bin_msg) > 0
     cksum = 0
     for b in bin_msg:
         cksum += b
-    return cksum % 256    
+    return cksum % 256
+
 
 def validate_message_checksum(bin_msg):
     """
@@ -221,40 +230,42 @@ def validate_message_checksum(bin_msg):
     assert len(bin_msg) >= 2
     return compute_checksum(bin_msg[:-1]) == bin_msg[-1]
 
+
 def update_message_checksum(bin_msg):
     assert len(bin_msg) >= 2
     bin_msg[-1] = compute_checksum(bin_msg[:-1])
 
+
 def encode_message_to_ascii(bin_msg):
-    s = ''
+    s = ""
     for b in bin_msg:
-        s += '%02x' % b
+        s += "%02x" % b
     return s.upper()
+
 
 def decode_message_from_ascii(ascii_msg):
     n = len(ascii_msg)
     if n % 2 != 0:
         raise BadEncoding("ASCII message has uneven number of characters.")
-    b = [ 0 ] * (n/2)
-    for i in range(n/2):
-        b[i] = ascii_hex_to_byte(ascii_msg[2*i:2*i+2])
+    b = [0] * (n / 2)
+    for i in range(n / 2):
+        b[i] = ascii_hex_to_byte(ascii_msg[2 * i : 2 * i + 2])
     return b
 
 
 class AlarmPanelInterface(object):
     def __init__(self, dev_name, timeout_secs, logger):
-        self.serial_interface = SerialInterface(dev_name, timeout_secs, \
-                                                    self.ctrl_char_cb, logger)
+        self.serial_interface = SerialInterface(dev_name, timeout_secs, self.ctrl_char_cb, logger)
         self.timeout_secs = timeout_secs
         self.logger = logger
         self.logger.debug("Starting")
         self.panel = {}
         self.partitions = {}
-        self.zones  = {}
+        self.zones = {}
         self.users = {}
-        self.master_pin = '0520'
-     
-        self.display_messages = [];
+        self.master_pin = "0520"
+
+        self.display_messages = []
         # Messages on the transmit queue are in binary format with a
         # valid checksum.
         self.tx_queue = Queue.Queue()
@@ -266,14 +277,12 @@ class AlarmPanelInterface(object):
 
         self.reset_pending_tx()
 
-        self.message_handlers = { } # Command ID -> list of message handlers for that ID.
-        for command_code, (command_id, command_name, parser_fn) \
-                in RX_COMMANDS.items():
-            self.message_handlers[command_id] = [ ]
-        
+        self.message_handlers = {}  # Command ID -> list of message handlers for that ID.
+        for command_code, (command_id, command_name, parser_fn) in RX_COMMANDS.items():
+            self.message_handlers[command_id] = []
 
     def register_message_handler(self, command_id, handler_fn):
-        """ 
+        """
         *handler_fn* will be passed a dict that is the result of
         parsing the message for the specificed command ID.
 
@@ -285,7 +294,7 @@ class AlarmPanelInterface(object):
         self.message_handlers[command_id].append(handler_fn)
 
     def ctrl_char_cb(self, cc):
-        #self.logger.debug("Ctrl char %r" % cc)
+        # self.logger.debug("Ctrl char %r" % cc)
         if cc == ACK:
             if self.tx_pending is None:
                 self.logger.debug("Spurious ACK")
@@ -309,9 +318,9 @@ class AlarmPanelInterface(object):
         self.tx_time = None
         self.tx_pending = None
         self.tx_num_attempts = 0
-    
+
     def send_message(self, msg, retry=False):
-        """ 
+        """
         Send a message directly to the serial port.  Update pending TX
         state.  If *retry* is True, increment the attempts count,
         otherwise reset it to first attempt.
@@ -319,19 +328,25 @@ class AlarmPanelInterface(object):
         self.tx_pending = msg
         if retry:
             self.tx_num_attempts += 1
-            self.logger.warn("Resending message, attempt %d: %r" % \
-                                  (self.tx_num_attempts, encode_message_to_ascii(msg)))
+            self.logger.warn(
+                "Resending message, attempt %d: %r"
+                % (self.tx_num_attempts, encode_message_to_ascii(msg))
+            )
         else:
             self.tx_num_attempts = 1
-            self.logger.debug("Sending message (retry=%d) %r" % \
-                     (self.tx_num_attempts, encode_message_to_ascii(msg)))
+            self.logger.debug(
+                "Sending message (retry=%d) %r"
+                % (self.tx_num_attempts, encode_message_to_ascii(msg))
+            )
         self.tx_time = datetime.now()
         self.serial_interface.write_message(msg)
 
     def maybe_resend_message(self, reason):
         if self.tx_num_attempts >= MAX_RESENDS:
-            self.logger.error("Unable to send message (%s), too many attempts (%d): %r" % \
-                                  (reason, MAX_RESENDS, encode_message_to_ascii(self.tx_pending)))
+            self.logger.error(
+                "Unable to send message (%s), too many attempts (%d): %r"
+                % (reason, MAX_RESENDS, encode_message_to_ascii(self.tx_pending))
+            )
             self.reset_pending_tx()
         else:
             self.send_message(self.tx_pending, retry=True)
@@ -358,20 +373,19 @@ class AlarmPanelInterface(object):
         """
         msg.append(compute_checksum(msg))
         self.fake_rx_queue.put(msg)
-        
 
     def stop_loop(self):
         self.tx_queue.put(STOP)
 
     def message_loop(self):
-        self.logger.debug("Message Loop Starting")        
-        #self.request_partitions();
-        #time.sleep(1)
-        self.request_zones();        
-        #time.sleep(1)
-        #self.request_users();
-        #time.sleep(1)
-        self.request_dynamic_data_refresh();
+        self.logger.debug("Message Loop Starting")
+        # self.request_partitions();
+        # time.sleep(1)
+        self.request_zones()
+        # time.sleep(1)
+        # self.request_users();
+        # time.sleep(1)
+        self.request_dynamic_data_refresh()
         loop_start_at = datetime.now()
         loop_last_print_at = datetime.now()
 
@@ -386,7 +400,7 @@ class AlarmPanelInterface(object):
             no_inputs = True
             no_outputs = True
 
-            # 
+            #
             # Handle any synthetic messages and loop them back to us.
             #
             if not self.fake_rx_queue.empty():
@@ -397,20 +411,22 @@ class AlarmPanelInterface(object):
                 # ourselves!
                 self.handle_message(msg)
 
-            # 
+            #
             # Handle incoming messages.
             #
             # Two part test: the first part will fail right away if
             # there no characters, regardless of the timeout, so we
             # minimize time waiting on messages that won't arrive.
-            if self.serial_interface.message_chars_maybe_available() \
-                    and self.serial_interface.wait_for_message_start() == MSG_START:
+            if (
+                self.serial_interface.message_chars_maybe_available()
+                and self.serial_interface.wait_for_message_start() == MSG_START
+            ):
                 no_inputs = False
 
                 msg_ok = True
                 try:
                     msg = self.serial_interface.read_next_message()
-                    #self.logger.debug(msg)
+                    # self.logger.debug(msg)
                 except CommException as ex:
                     self.send_nak()
                     self.logger.error(repr(ex))
@@ -464,10 +480,8 @@ class AlarmPanelInterface(object):
 
             secs_since_print = total_secs(datetime.now() - loop_last_print_at)
             if secs_since_print > 20:
-                self.logger.debug("Looping %d" % \
-                                              total_secs(datetime.now() - loop_start_at))
+                self.logger.debug("Looping %d" % total_secs(datetime.now() - loop_start_at))
                 loop_last_print_at = datetime.now()
-
 
     def handle_message(self, msg):
         # Assume we have a good message here.  Command code will
@@ -494,55 +508,55 @@ class AlarmPanelInterface(object):
             self.logger.debug("No parser for command %s %s" % (command_name, command_id))
             return
 
-        #if command_id in ['SIREN_SYNC','TOUCHPAD']:
+        # if command_id in ['SIREN_SYNC','TOUCHPAD']:
         #    return
 
-        if command_id in ('SIREN_SYNC','SIREN_SETUP','SIREN_GO','LIGHTS_STATE'):
+        if command_id in ("SIREN_SYNC", "SIREN_SETUP", "SIREN_GO", "LIGHTS_STATE"):
             return
 
-        if command_id not in ('TOUCHPAD'):
-            self.logger.debug("Handling command %s %s, %s" % \
-                                      (cmd_str, command_id, command_parser.__name__))
-        
+        if command_id not in ("TOUCHPAD"):
+            self.logger.debug(
+                "Handling command %s %s, %s" % (cmd_str, command_id, command_parser.__name__)
+            )
 
         try:
-            decoded_command = command_parser(self,msg)
+            decoded_command = command_parser(self, msg)
             if not decoded_command:
                 return
 
-            decoded_command['command_id'] = command_id
-            
-            if 'action' in decoded_command:
+            decoded_command["command_id"] = command_id
+
+            if "action" in decoded_command:
                 try:
-                    #self.logger.info('Try to execute: %r' % decoded_command['action'])
-                    func = getattr(self, decoded_command['action'], None)
+                    # self.logger.info('Try to execute: %r' % decoded_command['action'])
+                    func = getattr(self, decoded_command["action"], None)
                     if func is not None:
                         func(decoded_command)
                     else:
-                        self.logger.info('Counld not execute: %r' % decoded_command['action'])
+                        self.logger.info("Counld not execute: %r" % decoded_command["action"])
                 except AttributeError as e:
-                    self.logger.info(decoded_command['action'] + ' does not exists')
+                    self.logger.info(decoded_command["action"] + " does not exists")
                     self.logger.info(e)
-            
+
             self.logger.debug(repr(decoded_command))
             for handler in self.message_handlers[command_id]:
                 self.logger.debug("Calling handler %r" % handler)
-        
-        except Exception as ex:
-            self.logger.error("Problem handling command %r\n%r" % \
-                                  (ex, encode_message_to_ascii(msg)))
-            self.logger.error(traceback.format_exc())
 
+        except Exception as ex:
+            self.logger.error(
+                "Problem handling command %r\n%r" % (ex, encode_message_to_ascii(msg))
+            )
+            self.logger.error(traceback.format_exc())
 
     def send_the_master_code(self, msg):
         if self.master_pin is not None:
             keys = []
             for k in self.master_pin:
                 self.logger.debug("Adding Key: " + k)
-                keys.append(0x00+int(k))
+                keys.append(0x00 + int(k))
             self.send_keypress(keys)
 
-    def send_nak(self):       
+    def send_nak(self):
         self.serial_interface.write(NAK.encode())
 
     def send_ack(self):
@@ -553,17 +567,17 @@ class AlarmPanelInterface(object):
         self.enqueue_msg_for_tx(msg)
 
     def request_zones(self):
-        req = EQPT_LIST_REQ_TYPES['ZONE_DATA']
+        req = EQPT_LIST_REQ_TYPES["ZONE_DATA"]
         msg = build_cmd_equipment_list(request_type=req)
         self.enqueue_msg_for_tx(msg)
 
     def request_partitions(self):
-        req = EQPT_LIST_REQ_TYPES['PART_DATA']
+        req = EQPT_LIST_REQ_TYPES["PART_DATA"]
         msg = build_cmd_equipment_list(request_type=req)
         self.enqueue_msg_for_tx(msg)
 
     def request_users(self):
-        req = EQPT_LIST_REQ_TYPES['USER_DATA']
+        req = EQPT_LIST_REQ_TYPES["USER_DATA"]
         msg = build_cmd_equipment_list(request_type=req)
         self.enqueue_msg_for_tx(msg)
 
@@ -574,47 +588,41 @@ class AlarmPanelInterface(object):
     def send_keypress(self, keys, partition=1, no_check=False):
         msg = build_keypress(keys, partition, area=0, no_check=True)
         self.enqueue_msg_for_tx(msg)
-        
-    def arm_stay(self,option):
+
+    def arm_stay(self, option):
         if option == None:
             self.send_keypress([0x02])
-        elif option == 'silent':
+        elif option == "silent":
             self.send_keypress([0x05, 0x02])
-        elif option == 'instant':
+        elif option == "instant":
             self.send_keypress([0x02, 0x04])
 
-    def arm_away(self,option):
+    def arm_away(self, option):
         if option == None:
             self.send_keypress([0x03])
-        elif option == 'silent':
+        elif option == "silent":
             self.send_keypress([0x05, 0x03])
-        elif option == 'instant':
+        elif option == "instant":
             self.send_keypress([0x03, 0x04])
 
     def send_keys(self, keys, group):
         msg = []
         for k in keys:
             a = list(KEYPRESS_CODES.keys())[list(KEYPRESS_CODES.values()).index(str(k))]
-            if group:               
+            if group:
                 msg.append(a)
             else:
                 self.logger.info("Sending key: %r" % msg)
-                self.send_keypress([a])        
+                self.send_keypress([a])
 
         if group:
             self.logger.info("Sending group of keys: %r" % msg)
-            self.send_keypress(msg)    
-       
+            self.send_keypress(msg)
 
-    def disarm(self,master_pin):
+    def disarm(self, master_pin):
         self.master_pin = master_pin
         self.send_keypress([0x20])
-        
-    def inject_alarm_message(self, partition, general_type, specific_type, event_data=0):
-        msg = build_cmd_alarm_trouble(partition, "System", 1,
-                                      general_type, specific_type)
-        self.enqueue_synthetic_msg_for_rx(msg)
-        
-                
-                
 
+    def inject_alarm_message(self, partition, general_type, specific_type, event_data=0):
+        msg = build_cmd_alarm_trouble(partition, "System", 1, general_type, specific_type)
+        self.enqueue_synthetic_msg_for_rx(msg)
