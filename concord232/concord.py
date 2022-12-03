@@ -1,15 +1,7 @@
 from datetime import datetime
-import sys
 import time
 import traceback
-
-
-is_py2 = sys.version[0] == "2"
-if is_py2:
-    import Queue as Queue
-else:
-    import queue as Queue
-
+import queue as Queue
 import serial
 
 
