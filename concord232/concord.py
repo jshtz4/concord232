@@ -593,7 +593,7 @@ class AlarmPanelInterface(object):
         if option == None:
             self.send_keypress([0x02])
         elif option == "silent":
-            self.send_keypress([0x05, 0x02])
+            self.send_keypress([0x05, 0x02, 0x04])
         elif option == "instant":
             self.send_keypress([0x02, 0x04])
 
