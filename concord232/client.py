@@ -42,6 +42,6 @@ class Client(object):
     def get_version(self):
         r = self._session.get(self._url + "/version")
         if r.status_code == 404:
-            return "1.0"
+            return "0"
         else:
             return r.json()["version"]
