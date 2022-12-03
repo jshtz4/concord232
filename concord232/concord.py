@@ -623,7 +623,7 @@ class AlarmPanelInterface(object):
         keys = [0x05, 0x01] if option.lower() == "silent" else [0x01]
 
         for k in master_pin:
-            keys.append(k)
+            keys.append(int(k))
 
         self.send_keypress(keys)
 
