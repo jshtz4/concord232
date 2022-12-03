@@ -593,7 +593,7 @@ class AlarmPanelInterface(object):
         if option == None:
             self.send_keypress([0x02])
         elif option == "silent":
-            self.send_keypress([0x05, 0x02])
+            self.send_keypress([0x05, 0x02, 0x04])
         elif option == "instant":
             self.send_keypress([0x02, 0x04])
 
@@ -619,9 +619,13 @@ class AlarmPanelInterface(object):
             self.logger.info("Sending group of keys: %r" % msg)
             self.send_keypress(msg)
 
-    def disarm(self, master_pin):
-        self.master_pin = master_pin
-        self.send_keypress([0x20])
+    def disarm(self, master_pin, option="silent"):
+        keys = [0x05, 0x01] if option.lower() == "silent" else [0x01]
+
+        for k in master_pin:
+            keys.append(k)
+
+        self.send_keypress(keys)
 
     def inject_alarm_message(self, partition, general_type, specific_type, event_data=0):
         msg = build_cmd_alarm_trouble(partition, "System", 1, general_type, specific_type)

@@ -101,7 +101,7 @@ def command():
 
 @app.route("/version")
 def get_version():
-    return flask.Response(json.dumps({"version": "1.1"}), mimetype="application/json")
+    return flask.Response(json.dumps({"version": "0.17"}), mimetype="application/json")
 
 
 @app.route("/equipment")
